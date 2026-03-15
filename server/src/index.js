@@ -7,12 +7,14 @@ import { fileURLToPath } from 'url';
 import multer from 'multer';
 import TelemetrySim from './telemetry-sim.js';
 import { parseTlog } from './tlog-parser.js';
+import { getVersionInfo } from './version.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = process.env.PORT || 3000;
 const TELEMETRY_HZ = 10;
+const VERSION_INFO = getVersionInfo();
 
 // Express app
 const app = express();
@@ -20,55 +22,16 @@ app.use(cors());
 app.use(express.json());
 
 // Multer for file uploads (store in memory)
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 }
+});
 
 // Serve static frontend build
 const frontendBuildPath = path.join(__dirname, '..', '..', 'frontend', 'build');
 app.use(express.static(frontendBuildPath));
 
-// Health check
-app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    uptime: process.uptime(),
-    version: '2.0.0',
-    clients: wss.clients.size,
-    telemetryHz: TELEMETRY_HZ,
-  });
-});
-
-// ─── Log File Upload ────────────────────────────────────────────────
-app.post('/api/upload-log', upload.single('logfile'), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'No file uploaded' });
-  }
-
-  try {
-    console.log(`[LOG] Parsing uploaded file: ${req.file.originalname} (${(req.file.size / 1024).toFixed(1)} KB)`);
-    const result = parseTlog(req.file.buffer);
-
-    if (result.snapshots.length === 0) {
-      return res.status(400).json({ error: 'No telemetry data found in log file' });
-    }
-
-    // Store parsed log for playback
-    logPlayback.load(result.snapshots, result.duration);
-
-    console.log(`[LOG] Parsed ${result.messageCount} MAVLink messages → ${result.snapshots.length} snapshots (${(result.duration / 1000).toFixed(1)}s)`);
-
-    res.json({
-      status: 'ok',
-      snapshots: result.snapshots.length,
-      duration: result.duration,
-      messageCount: result.messageCount,
-    });
-  } catch (e) {
-    console.error('[LOG] Parse error:', e.message);
-    res.status(500).json({ error: 'Failed to parse log file: ' + e.message });
-  }
-});
-
-// ─── Log Playback Engine ────────────────────────────────────────────
+// Log playback engine
 const logPlayback = {
   snapshots: [],
   duration: 0,
@@ -91,10 +54,8 @@ const logPlayback = {
     if (this.snapshots.length === 0) return;
 
     if (this.isPaused) {
-      // Resume from pause
       this.isPaused = false;
       this.isPlaying = true;
-      // Recalculate wall time offset from current position
       this.startWallTime = Date.now();
       this.startLogTime = this.snapshots[this.currentIndex]._timeMs;
       this._scheduleNext();
@@ -102,7 +63,6 @@ const logPlayback = {
       return;
     }
 
-    // Fresh play from current position
     this.isPlaying = true;
     this.isPaused = false;
     this.startWallTime = Date.now();
@@ -131,7 +91,6 @@ const logPlayback = {
 
   replay() {
     this.stop();
-    // Reset to beginning, then auto-play
     this.currentIndex = 0;
     this.play();
   },
@@ -142,23 +101,23 @@ const logPlayback = {
     clearTimeout(this.playbackTimer);
     this.playbackTimer = null;
 
-    // Build batch of ALL snapshots with timestamps spaced 100ms apart (10Hz)
-    // ending at "now" — same as if playback had run through normally
     const now = Date.now();
     const totalCount = this.snapshots.length;
-    const intervalMs = 100; // 10Hz playback rate
+    const intervalMs = 100;
     const allSnapshots = [];
 
     for (let i = 0; i < totalCount; i++) {
       const snap = { ...this.snapshots[i] };
-      // Timestamps go from (now - (totalCount-1)*100ms) up to now
       snap.ts = now - (totalCount - 1 - i) * intervalMs;
       delete snap._timeMs;
       allSnapshots.push(snap);
     }
 
-    // Send as a single batch message
-    const batchMsg = JSON.stringify({ type: 'log_batch', snapshots: allSnapshots });
+    const batchMsg = JSON.stringify({
+      type: 'log_batch',
+      snapshots: allSnapshots
+    });
+
     for (const client of wss.clients) {
       if (client.readyState === 1) {
         client.send(batchMsg);
@@ -190,14 +149,12 @@ const logPlayback = {
     this.playbackTimer = setTimeout(() => {
       if (!this.isPlaying) return;
 
-      // Send this snapshot with real wall-clock timestamp
       const payload = { ...snap, ts: Date.now() };
       delete payload._timeMs;
       broadcastTelemetry(payload);
 
       this.currentIndex++;
 
-      // Send progress update every 10 snapshots
       if (this.currentIndex % 10 === 0) {
         broadcastPlaybackState();
       }
@@ -219,6 +176,63 @@ const logPlayback = {
     };
   },
 };
+
+// Health check
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    uptime: process.uptime(),
+    version: VERSION_INFO.version,
+    gitSha: VERSION_INFO.gitSha,
+    buildTime: VERSION_INFO.buildTime,
+    clients: wss.clients.size,
+    telemetryHz: TELEMETRY_HZ,
+  });
+});
+
+// Version endpoint
+app.get('/api/version', (req, res) => {
+  res.json({
+    version: VERSION_INFO.version,
+    gitSha: VERSION_INFO.gitSha,
+    buildTime: VERSION_INFO.buildTime,
+  });
+});
+
+// Log upload
+app.post('/api/upload-log', upload.single('logfile'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded' });
+  }
+
+  try {
+    console.log(
+      `[LOG] Parsing uploaded file: ${req.file.originalname} (${(req.file.size / 1024).toFixed(1)} KB)`
+    );
+
+    const result = parseTlog(req.file.buffer);
+
+    if (result.snapshots.length === 0) {
+      return res.status(400).json({ error: 'No telemetry data found in log file' });
+    }
+
+    logPlayback.load(result.snapshots, result.duration);
+
+    console.log(
+      `[LOG] Parsed ${result.messageCount} MAVLink messages → ${result.snapshots.length} snapshots (${(result.duration / 1000).toFixed(1)}s)`
+    );
+
+    res.json({
+      status: 'ok',
+      snapshots: result.snapshots.length,
+      duration: result.duration,
+      messageCount: result.messageCount,
+    });
+  } catch (e) {
+    console.error('[LOG] Parse error:', e.message);
+    res.status(500).json({ error: 'Failed to parse log file: ' + e.message });
+  }
+});
 
 function broadcastTelemetry(payload) {
   const data = JSON.stringify(payload);
@@ -246,7 +260,7 @@ app.get('*', (req, res) => {
 // HTTP server
 const server = createServer(app);
 
-// WebSocket server — use /ws path to avoid SPA fallback conflicts
+// WebSocket server
 const wss = new WebSocketServer({ noServer: true });
 
 server.on('upgrade', (req, socket, head) => {
@@ -264,25 +278,25 @@ let msgCount = 0;
 let lastRateCheck = Date.now();
 let messageRate = 0;
 
-// Current mode: 'sim' (default) or 'log'
+// Current mode
 let serverMode = 'sim';
 
 wss.on('connection', (ws, req) => {
   const clientIP = req.socket.remoteAddress;
   console.log(`[WS] Client connected from ${clientIP} (${wss.clients.size} total)`);
 
-  // Send welcome with system status
   ws.send(JSON.stringify({
     type: 0x02,
     ts: Date.now(),
-    version: '2.0.0',
+    version: VERSION_INFO.version,
+    gitSha: VERSION_INFO.gitSha,
+    buildTime: VERSION_INFO.buildTime,
     clients: wss.clients.size,
     uptime: Math.floor(process.uptime()),
     heap: Math.round(process.memoryUsage().heapUsed / 1024),
     msgRate: messageRate,
   }));
 
-  // If log is loaded, send playback state
   if (logPlayback.snapshots.length > 0) {
     ws.send(JSON.stringify(logPlayback.getState()));
   }
@@ -290,10 +304,10 @@ wss.on('connection', (ws, req) => {
   ws.on('message', (data) => {
     try {
       const msg = JSON.parse(data.toString());
+
       if (msg.type === 0x10) {
         console.log(`[CMD] ${JSON.stringify(msg)}`);
 
-        // Handle playback commands
         switch (msg.cmd) {
           case 'set_mode':
             serverMode = msg.mode || 'sim';
@@ -332,7 +346,7 @@ wss.on('connection', (ws, req) => {
             ws.send(JSON.stringify({ type: 'cmd_ack', cmd: msg.cmd, status: 'ok' }));
         }
       }
-    } catch (e) {
+    } catch {
       // ignore
     }
   });
@@ -342,10 +356,10 @@ wss.on('connection', (ws, req) => {
   });
 });
 
-// Telemetry broadcast loop (only when in sim mode)
+// Telemetry broadcast loop
 setInterval(() => {
   if (serverMode !== 'sim') {
-    sim.tick(1 / TELEMETRY_HZ); // Keep sim running but don't broadcast
+    sim.tick(1 / TELEMETRY_HZ);
     return;
   }
 
@@ -365,7 +379,7 @@ setInterval(() => {
   }
 }, 1000 / TELEMETRY_HZ);
 
-// System status broadcast (1 Hz)
+// System status broadcast
 setInterval(() => {
   const now = Date.now();
   const elapsed = (now - lastRateCheck) / 1000;
@@ -376,7 +390,9 @@ setInterval(() => {
   const status = JSON.stringify({
     type: 0x02,
     ts: now,
-    version: '2.0.0',
+    version: VERSION_INFO.version,
+    gitSha: VERSION_INFO.gitSha,
+    buildTime: VERSION_INFO.buildTime,
     clients: wss.clients.size,
     uptime: Math.floor(process.uptime()),
     heap: Math.round(process.memoryUsage().heapUsed / 1024),
@@ -392,11 +408,11 @@ setInterval(() => {
 
 // Start
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n  MAESTRO 2.0 Ground Station`);
-  console.log(`  ─────────────────────────`);
-  console.log(`  HTTP:      http://localhost:${PORT}`);
-  console.log(`  WebSocket: ws://localhost:${PORT}`);
-  console.log(`  Telemetry: ${TELEMETRY_HZ} Hz (simulated)`);
-  console.log(`  Log Upload: POST /api/upload-log`);
-  console.log(`  Mode:      development\n`);
+  console.log(`\n MAESTRO 2.0 Ground Station`);
+  console.log(` HTTP: http://localhost:${PORT}`);
+  console.log(` WebSocket: ws://localhost:${PORT}`);
+  console.log(` Telemetry: ${TELEMETRY_HZ} Hz`);
+  console.log(` Version: ${VERSION_INFO.version}`);
+  console.log(` Git SHA: ${VERSION_INFO.gitSha}`);
+  console.log(` Build Time: ${VERSION_INFO.buildTime}\n`);
 });

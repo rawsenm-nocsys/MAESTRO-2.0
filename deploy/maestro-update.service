@@ -1,0 +1,10 @@
+[Unit]
+Description=Check GitHub for MAESTRO updates
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=nocturnesystems
+WorkingDirectory=/opt/maestro
+ExecStart=/opt/maestro/scripts/update-maestro.sh
