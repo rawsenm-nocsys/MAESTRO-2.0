@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import fs from 'fs';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
 import path from 'path';
@@ -7,21 +8,28 @@ import { fileURLToPath } from 'url';
 import multer from 'multer';
 import TelemetrySim from './telemetry-sim.js';
 import { parseTlog } from './tlog-parser.js';
-import { getVersionInfo } from './version.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = process.env.PORT || 3000;
 const TELEMETRY_HZ = 10;
-const VERSION_INFO = getVersionInfo();
+const UPDATE_STATUS_PATH = '/etc/maestro/update-status.json';
+
+function getVersionInfo() {
+  return {
+    version: process.env.MAESTRO_VERSION || '2.0.0',
+    gitSha: process.env.MAESTRO_GIT_SHA || 'unknown',
+    buildTime: process.env.MAESTRO_BUILD_TIME || 'unknown',
+  };
+}
 
 // Express app
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Multer for file uploads (store in memory)
+// Multer for file uploads
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024 }
@@ -31,7 +39,7 @@ const upload = multer({
 const frontendBuildPath = path.join(__dirname, '..', '..', 'frontend', 'build');
 app.use(express.static(frontendBuildPath));
 
-// Log playback engine
+// Log Playback Engine
 const logPlayback = {
   snapshots: [],
   duration: 0,
@@ -179,12 +187,14 @@ const logPlayback = {
 
 // Health check
 app.get('/api/health', (req, res) => {
+  const versionInfo = getVersionInfo();
+
   res.json({
     status: 'ok',
     uptime: process.uptime(),
-    version: VERSION_INFO.version,
-    gitSha: VERSION_INFO.gitSha,
-    buildTime: VERSION_INFO.buildTime,
+    version: versionInfo.version,
+    gitSha: versionInfo.gitSha,
+    buildTime: versionInfo.buildTime,
     clients: wss.clients.size,
     telemetryHz: TELEMETRY_HZ,
   });
@@ -192,11 +202,33 @@ app.get('/api/health', (req, res) => {
 
 // Version endpoint
 app.get('/api/version', (req, res) => {
-  res.json({
-    version: VERSION_INFO.version,
-    gitSha: VERSION_INFO.gitSha,
-    buildTime: VERSION_INFO.buildTime,
-  });
+  res.json(getVersionInfo());
+});
+
+// Update status endpoint for progress bar
+app.get('/api/update-status', (req, res) => {
+  try {
+    if (!fs.existsSync(UPDATE_STATUS_PATH)) {
+      return res.json({
+        updating: false,
+        stage: 'Idle',
+        progress: 0,
+        message: 'No update activity recorded yet',
+        error: null,
+      });
+    }
+
+    const raw = fs.readFileSync(UPDATE_STATUS_PATH, 'utf8');
+    return res.type('application/json').send(raw);
+  } catch (err) {
+    return res.status(500).json({
+      updating: false,
+      stage: 'Error',
+      progress: 0,
+      message: 'Failed to read update status',
+      error: err.message,
+    });
+  }
 });
 
 // Log upload
@@ -283,14 +315,16 @@ let serverMode = 'sim';
 
 wss.on('connection', (ws, req) => {
   const clientIP = req.socket.remoteAddress;
+  const versionInfo = getVersionInfo();
+
   console.log(`[WS] Client connected from ${clientIP} (${wss.clients.size} total)`);
 
   ws.send(JSON.stringify({
     type: 0x02,
     ts: Date.now(),
-    version: VERSION_INFO.version,
-    gitSha: VERSION_INFO.gitSha,
-    buildTime: VERSION_INFO.buildTime,
+    version: versionInfo.version,
+    gitSha: versionInfo.gitSha,
+    buildTime: versionInfo.buildTime,
     clients: wss.clients.size,
     uptime: Math.floor(process.uptime()),
     heap: Math.round(process.memoryUsage().heapUsed / 1024),
@@ -381,6 +415,7 @@ setInterval(() => {
 
 // System status broadcast
 setInterval(() => {
+  const versionInfo = getVersionInfo();
   const now = Date.now();
   const elapsed = (now - lastRateCheck) / 1000;
   messageRate = Math.round(msgCount / elapsed);
@@ -390,9 +425,9 @@ setInterval(() => {
   const status = JSON.stringify({
     type: 0x02,
     ts: now,
-    version: VERSION_INFO.version,
-    gitSha: VERSION_INFO.gitSha,
-    buildTime: VERSION_INFO.buildTime,
+    version: versionInfo.version,
+    gitSha: versionInfo.gitSha,
+    buildTime: versionInfo.buildTime,
     clients: wss.clients.size,
     uptime: Math.floor(process.uptime()),
     heap: Math.round(process.memoryUsage().heapUsed / 1024),
@@ -408,11 +443,15 @@ setInterval(() => {
 
 // Start
 server.listen(PORT, '0.0.0.0', () => {
+  const versionInfo = getVersionInfo();
+
   console.log(`\n MAESTRO 2.0 Ground Station`);
+  console.log(` ─────────────────────────`);
   console.log(` HTTP: http://localhost:${PORT}`);
   console.log(` WebSocket: ws://localhost:${PORT}`);
-  console.log(` Telemetry: ${TELEMETRY_HZ} Hz`);
-  console.log(` Version: ${VERSION_INFO.version}`);
-  console.log(` Git SHA: ${VERSION_INFO.gitSha}`);
-  console.log(` Build Time: ${VERSION_INFO.buildTime}\n`);
+  console.log(` Telemetry: ${TELEMETRY_HZ} Hz (simulated)`);
+  console.log(` Log Upload: POST /api/upload-log`);
+  console.log(` Version: ${versionInfo.version}`);
+  console.log(` Git SHA: ${versionInfo.gitSha}`);
+  console.log(` Build Time: ${versionInfo.buildTime}\n`);
 });
