@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 import multer from 'multer';
 import TelemetrySim from './telemetry-sim.js';
 import { parseTlog } from './tlog-parser.js';
+import { startBaton, getDevices } from './baton.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -313,6 +314,9 @@ let messageRate = 0;
 // Current mode
 let serverMode = 'sim';
 
+// Start ADAGIO EDU live radio pipeline
+startBaton(broadcastTelemetry);
+
 wss.on('connection', (ws, req) => {
   const clientIP = req.socket.remoteAddress;
   const versionInfo = getVersionInfo();
@@ -329,6 +333,8 @@ wss.on('connection', (ws, req) => {
     uptime: Math.floor(process.uptime()),
     heap: Math.round(process.memoryUsage().heapUsed / 1024),
     msgRate: messageRate,
+    mode: serverMode,
+    devices: getDevices(),
   }));
 
   if (logPlayback.snapshots.length > 0) {
@@ -432,6 +438,8 @@ setInterval(() => {
     uptime: Math.floor(process.uptime()),
     heap: Math.round(process.memoryUsage().heapUsed / 1024),
     msgRate: messageRate,
+    mode: serverMode,
+    devices: getDevices(),
   });
 
   for (const client of wss.clients) {

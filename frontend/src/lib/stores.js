@@ -85,6 +85,16 @@ export const telemetry = derived(rawTelemetry, ($raw) => {
     armed: $raw.arm === 1,
     flightMode: FLIGHT_MODES[$raw.fm] || `MODE_${$raw.fm}`,
     timestamp: $raw.ts,
+    // ADAGIO EDU extensions (present only in 'live' mode; null otherwise)
+    pressure:    $raw.pr   ?? null,   // hPa (integer)
+    gyroX:       $raw.gx   ?? null,   // rad/s
+    gyroY:       $raw.gy   ?? null,   // rad/s
+    gyroZ:       $raw.gz   ?? null,   // rad/s
+    statusFlags: $raw.sf   ?? null,   // uint8 bitmask
+    devicePipe:  $raw.dev  ?? null,   // pipe index 1–3
+    mpuOk:    $raw.sf != null ? Boolean($raw.sf & 0x01) : null,
+    bmpOk:    $raw.sf != null ? Boolean($raw.sf & 0x02) : null,
+    txEnabled:$raw.sf != null ? Boolean($raw.sf & 0x04) : null,
   };
 });
 
@@ -115,6 +125,10 @@ export const deviceName = writable('No Device');
 // Playback state (from server log playback engine)
 export const playbackState = writable(null);
 
+// ADAGIO EDU live device list (updated from type 0x02 system status)
+// Each entry: { id, pipe, chipId, lastSeen, paired }
+export const activeDevices = writable([]);
+
 // Frozen time — when playback is paused/stopped/ended, charts freeze at this timestamp
 // null = use Date.now() (live mode)
 export const frozenTime = writable(null);
@@ -129,6 +143,7 @@ export function clearAllData() {
   systemStatus.set(null);
   messageRate.set(0);
   frozenTime.set(null);
+  activeDevices.set([]);
   for (const buf of Object.values(chartBuffers)) {
     buf.clear();
   }
@@ -148,6 +163,12 @@ export const chartBuffers = {
   accelY: new RingBuffer(3000),
   accelZ: new RingBuffer(3000),
   batteryA: new RingBuffer(3000),
+  // ADAGIO EDU live buffers
+  altitude: new RingBuffer(3000),   // altitude_m (derived from ar mm→m)
+  pressure: new RingBuffer(3000),   // pressure_hpa
+  gyroX:    new RingBuffer(3000),   // gx_rps
+  gyroY:    new RingBuffer(3000),   // gy_rps
+  gyroZ:    new RingBuffer(3000),   // gz_rps
 };
 
 // Push incoming telemetry into ring buffers
@@ -164,4 +185,10 @@ export function pushTelemetry(raw) {
   chartBuffers.accelY.push(ts, U.mgToMs2(raw.ay));
   chartBuffers.accelZ.push(ts, U.mgToMs2(raw.az));
   chartBuffers.batteryA.push(ts, U.caToA(raw.bc));
+  // ADAGIO EDU extensions (only populated when fields are present)
+  if (raw.pr != null) chartBuffers.pressure.push(ts, raw.pr);
+  if (raw.gx != null) chartBuffers.gyroX.push(ts, raw.gx);
+  if (raw.gy != null) chartBuffers.gyroY.push(ts, raw.gy);
+  if (raw.gz != null) chartBuffers.gyroZ.push(ts, raw.gz);
+  if (raw.ar != null && raw.pr != null) chartBuffers.altitude.push(ts, raw.ar / 1000);
 }

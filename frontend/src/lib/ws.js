@@ -1,4 +1,4 @@
-import { wsStatus, rawTelemetry, systemStatus, messageRate, pushTelemetry, connectionMode, deviceName, clearAllData, playbackState, frozenTime, batchTrail } from './stores.js';
+import { wsStatus, rawTelemetry, systemStatus, messageRate, pushTelemetry, connectionMode, deviceName, clearAllData, playbackState, frozenTime, batchTrail, activeDevices } from './stores.js';
 import * as U from './units.js';
 
 let ws = null;
@@ -27,13 +27,16 @@ export function connect(mode = 'websocket') {
   ws.onopen = () => {
     wsStatus.set('connected');
     connectionMode.set(mode);
-    deviceName.set(mode === 'log_file' ? 'Log Playback' : 'MAESTRO GCS');
-    console.log(`[MAESTRO] WebSocket connected (mode: ${mode})`);
-
-    // If log file mode, tell server to switch to log mode
     if (mode === 'log_file') {
+      deviceName.set('Log Playback');
       sendCommand('set_mode', { mode: 'log' });
+    } else if (mode === 'live') {
+      deviceName.set('ADAGIO EDU Live');
+      sendCommand('set_mode', { mode: 'live' });
+    } else {
+      deviceName.set('MAESTRO GCS');
     }
+    console.log(`[MAESTRO] WebSocket connected (mode: ${mode})`);
   };
 
   ws.onmessage = (event) => {
@@ -49,6 +52,9 @@ export function connect(mode = 'websocket') {
         frozenTime.set(null);
       } else if (msg.type === 0x02) {
         systemStatus.set(msg);
+        if (Array.isArray(msg.devices)) {
+          activeDevices.set(msg.devices);
+        }
       } else if (msg.type === 'playback_state') {
         playbackState.set(msg);
 

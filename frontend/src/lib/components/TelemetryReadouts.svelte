@@ -1,53 +1,104 @@
 <script>
   import { COLORS } from '$lib/theme.js';
-  import { telemetry } from '$lib/stores.js';
+  import { telemetry, systemStatus } from '$lib/stores.js';
   import { fmt } from '$lib/units.js';
 
-  let telem = $derived($telemetry);
+  let telem  = $derived($telemetry);
+  let isLive = $derived($systemStatus?.mode === 'live');
 </script>
 
 <div class="readouts">
   <div class="readout-title">TELEMETRY</div>
 
-  <div class="readout-row">
-    <span class="label">GPS Sats</span>
-    <span class="value">{telem?.satellites ?? '--'}</span>
-  </div>
+  {#if isLive}
+    <!-- ADAGIO EDU live fields -->
+    <div class="readout-row">
+      <span class="label">Altitude</span>
+      <span class="value">{telem ? telem.altRel?.toFixed(1) : '--'} m</span>
+    </div>
 
-  <div class="readout-row">
-    <span class="label">RSSI</span>
-    <span class="value">{telem?.rssi ?? '--'}%</span>
-  </div>
+    <div class="readout-row">
+      <span class="label">Pressure</span>
+      <span class="value">{telem?.pressure ?? '--'} hPa</span>
+    </div>
 
-  <div class="readout-row">
-    <span class="label">Climb</span>
-    <span class="value">{telem ? fmt(telem.climbRate) : '--'} m/s</span>
-  </div>
+    <div class="readout-row">
+      <span class="label">Gyro X</span>
+      <span class="value">{telem?.gyroX?.toFixed(3) ?? '--'} r/s</span>
+    </div>
 
-  <div class="readout-row">
-    <span class="label">Heading</span>
-    <span class="value">{telem ? fmt(telem.heading, 0) : '--'}°</span>
-  </div>
+    <div class="readout-row">
+      <span class="label">Gyro Y</span>
+      <span class="value">{telem?.gyroY?.toFixed(3) ?? '--'} r/s</span>
+    </div>
 
-  <div class="readout-row">
-    <span class="label">Voltage</span>
-    <span class="value">{telem ? fmt(telem.batteryV) : '--'} V</span>
-  </div>
+    <div class="readout-row">
+      <span class="label">Gyro Z</span>
+      <span class="value">{telem?.gyroZ?.toFixed(3) ?? '--'} r/s</span>
+    </div>
 
-  <div class="readout-row">
-    <span class="label">Current</span>
-    <span class="value">{telem ? fmt(telem.batteryA) : '--'} A</span>
-  </div>
+    <div class="readout-row">
+      <span class="label">Accel X</span>
+      <span class="value">{telem ? fmt(telem.ax) : '--'} m/s²</span>
+    </div>
 
-  <div class="readout-row">
-    <span class="label">Lat</span>
-    <span class="value">{telem ? telem.lat.toFixed(6) : '--'}°</span>
-  </div>
+    <div class="readout-row">
+      <span class="label">Accel Y</span>
+      <span class="value">{telem ? fmt(telem.ay) : '--'} m/s²</span>
+    </div>
 
-  <div class="readout-row">
-    <span class="label">Lon</span>
-    <span class="value">{telem ? telem.lon.toFixed(6) : '--'}°</span>
-  </div>
+    <div class="readout-row">
+      <span class="label">Accel Z</span>
+      <span class="value">{telem ? fmt(telem.az) : '--'} m/s²</span>
+    </div>
+
+    <div class="readout-row">
+      <span class="label">Device</span>
+      <span class="value">{telem?.devicePipe != null ? 'PIPE ' + telem.devicePipe : '--'}</span>
+    </div>
+
+  {:else}
+    <!-- Standard MAVLink / sim fields -->
+    <div class="readout-row">
+      <span class="label">GPS Sats</span>
+      <span class="value">{telem?.satellites ?? '--'}</span>
+    </div>
+
+    <div class="readout-row">
+      <span class="label">RSSI</span>
+      <span class="value">{telem?.rssi ?? '--'}%</span>
+    </div>
+
+    <div class="readout-row">
+      <span class="label">Climb</span>
+      <span class="value">{telem ? fmt(telem.climbRate) : '--'} m/s</span>
+    </div>
+
+    <div class="readout-row">
+      <span class="label">Heading</span>
+      <span class="value">{telem ? fmt(telem.heading, 0) : '--'}°</span>
+    </div>
+
+    <div class="readout-row">
+      <span class="label">Voltage</span>
+      <span class="value">{telem ? fmt(telem.batteryV) : '--'} V</span>
+    </div>
+
+    <div class="readout-row">
+      <span class="label">Current</span>
+      <span class="value">{telem ? fmt(telem.batteryA) : '--'} A</span>
+    </div>
+
+    <div class="readout-row">
+      <span class="label">Lat</span>
+      <span class="value">{telem ? telem.lat.toFixed(6) : '--'}°</span>
+    </div>
+
+    <div class="readout-row">
+      <span class="label">Lon</span>
+      <span class="value">{telem ? telem.lon.toFixed(6) : '--'}°</span>
+    </div>
+  {/if}
 </div>
 
 <style>

@@ -83,6 +83,12 @@
         statusMsg = '';
         close();
         return;
+      } else if (connType === 'ADAGIO Live') {
+        connect('live');
+        connecting = false;
+        statusMsg = '';
+        close();
+        return;
       } else {
         connect('websocket');
       }
@@ -117,7 +123,7 @@
   }
 
   const baudRates = [9600, 57600, 115200, 230400];
-  const connTypes = ['Serial Port', 'UDP Network', 'TCP Network', 'Log File'];
+  const connTypes = ['Serial Port', 'UDP Network', 'TCP Network', 'Log File', 'ADAGIO Live'];
 </script>
 
 {#if visible}
@@ -185,6 +191,16 @@
               {logFile.name} ({(logFile.size / 1024).toFixed(1)} KB)
             </div>
           {/if}
+
+        {:else if connType === 'ADAGIO Live'}
+          <div class="adagio-info">
+            <div class="adagio-info-row"><span class="adagio-key">WiFi AP</span><span class="adagio-val">MAESTRO_GS</span></div>
+            <div class="adagio-info-row"><span class="adagio-key">GS IP</span><span class="adagio-val">192.168.50.1</span></div>
+            <div class="adagio-info-row"><span class="adagio-key">Discovery</span><span class="adagio-val">UDP :5010</span></div>
+            <div class="adagio-info-row"><span class="adagio-key">NRF24</span><span class="adagio-val">ch108 · 250 kbps</span></div>
+            <div class="adagio-info-row"><span class="adagio-key">Max devices</span><span class="adagio-val">3</span></div>
+          </div>
+          <div class="status-msg">Ensure ADAGIO_EDU_MAESTRO firmware is flashed and the RPi WiFi AP is active.</div>
         {/if}
 
         {#if statusMsg}
@@ -200,6 +216,10 @@
         {#if connType === 'Log File'}
           <button class="btn btn-primary" onclick={doConnect} disabled={connecting || !logFile}>
             {connecting ? 'Loading...' : 'Load Log'}
+          </button>
+        {:else if connType === 'ADAGIO Live'}
+          <button class="btn btn-live" onclick={doConnect} disabled={connecting}>
+            {connecting ? 'Connecting...' : 'Go Live'}
           </button>
         {:else}
           <button class="btn btn-primary" onclick={doConnect} disabled={connecting}>
@@ -348,4 +368,32 @@
     border: 1px solid #3A3A3A;
   }
   .btn-secondary:hover { background: #2A2A2A; color: #FFFFFF; }
+  .btn-live {
+    background: #0A3A2A;
+    color: #4ADE80;
+    border: 1px solid #1A6040;
+  }
+  .btn-live:hover:not(:disabled) { background: #0D4A35; }
+  /* ADAGIO Live info panel */
+  .adagio-info {
+    background: #111111;
+    border: 1px solid #2A2A2A;
+    border-radius: 4px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .adagio-info-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+  }
+  .adagio-key {
+    color: #666666;
+  }
+  .adagio-val {
+    color: #22D3EE;
+    font-family: 'Consolas', 'Courier New', monospace;
+  }
 </style>
